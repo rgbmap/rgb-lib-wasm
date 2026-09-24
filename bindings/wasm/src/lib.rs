@@ -835,6 +835,30 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
         .map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+/// Read an RGB consignment offchain: what it transfers, and the bitcoin transaction behind
+/// every step of its history.
+///
+/// Takes the consignment as it was handed over — the raw strict-encoded bytes, or the ASCII
+/// armored text a wallet exports — and the Bitcoin network. The witness transactions come
+/// from the consignment itself, so this needs no wallet, no mnemonic, no data directory and
+/// no network access, and the caller does not have to know any transaction id in advance: a
+/// consignment names its own. A contract consignment is read too, and reports the issuance
+/// alone.
+///
+/// Returns a JS object: `{ valid, transfer, warnings, error, details, contractId, schemaId,
+/// chainNet, asset, steps }`. `asset` and `steps` are filled in only when the consignment
+/// validates. Amounts are `u64` and arrive as BigInt.
+#[wasm_bindgen(js_name = "consignmentHistory")]
+pub fn consignment_history(consignment_bytes: &[u8], network: &str) -> Result<JsValue, JsValue> {
+    let bitcoin_network = network
+        .parse::<rgb_lib_wasm::BitcoinNetwork>()
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let history =
+        rgb_lib_wasm::wallet::rust_only::consignment_history(consignment_bytes, bitcoin_network)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    to_js(&history)
+}
+
 /// Validate an RGB consignment using witness data bundled in the consignment (offchain).
 ///
 /// Works before the witness transaction is broadcast. Takes the raw consignment

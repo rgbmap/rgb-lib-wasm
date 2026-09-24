@@ -39,7 +39,10 @@ pub use bdk_wallet::bitcoin;
 pub use rgbinvoice::RgbTransport;
 pub use rgbstd::{
     ChainNet, ContractId, Txid as RgbTxid,
-    containers::{ConsignmentExt, Fascia, FileContent, PubWitness, Transfer as RgbTransfer},
+    containers::{
+        ConsignmentExt, Contract as RgbContract, Fascia, FileContent, PubWitness,
+        Transfer as RgbTransfer,
+    },
     indexers::AnyResolver,
     persistence::UpdateRes,
     schema::SchemaId,
@@ -137,7 +140,7 @@ use rgbstd::{
 };
 #[cfg(feature = "esplora")]
 use rgbstd::{
-    Assign, KnownTransition,
+    Assign, Assignments, ExposedSeal, KnownTransition, OpId,
     containers::Consignment,
     contract::SchemaWrapper,
     daggy::Walker,
@@ -145,7 +148,11 @@ use rgbstd::{
     validation::{OpoutsDagData, Validity, Warning},
 };
 #[cfg(feature = "esplora")]
-use schemata::{IfaWrapper, NiaWrapper, OS_ASSET, OS_INFLATION};
+use schemata::{
+    CFA_SCHEMA_ID, CfaWrapper, CollectibleFungibleAsset, IFA_SCHEMA_ID, IfaWrapper, NIA_SCHEMA_ID,
+    NiaWrapper, OS_ASSET, OS_INFLATION, OS_LINK, PFA_SCHEMA_ID, PermissionedFungibleAsset,
+    PfaWrapper, UDA_SCHEMA_ID, UdaWrapper, UniqueDigitalAsset,
+};
 use schemata::{InflatableFungibleAsset, NonInflatableAsset};
 use scrypt::{
     Params, Scrypt,
@@ -154,7 +161,7 @@ use scrypt::{
 use serde::de::{self, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use slog::{Drain, Logger, debug, error, info, o, warn};
-use strict_encoding::{DecodeError, DeserializeError, FieldName};
+use strict_encoding::{DecodeError, DeserializeError, FieldName, StrictDeserialize};
 use time::OffsetDateTime;
 use typenum::consts::U32;
 
