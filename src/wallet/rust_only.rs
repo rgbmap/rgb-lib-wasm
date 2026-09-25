@@ -755,6 +755,38 @@ pub struct HistoryStep {
     pub creates: Vec<HistoryAllocation>,
 }
 
+/// A file the genesis commits to. The consignment carries the commitment, never the bytes:
+/// whoever hands the file over is checked against the digest, and a reader that has not been
+/// handed it knows what it is looking for and that it does not have it.
+#[cfg(feature = "esplora")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "camel_case", serde(rename_all = "camelCase"))]
+pub struct ConsignmentMedia {
+    /// The attachment slot the genesis filed the file under. `None` for the asset's own media.
+    pub index: Option<u8>,
+    /// Media type the genesis states, as `type/subtype`.
+    pub mime: String,
+    /// SHA-256 of the file, hex encoded.
+    pub digest: String,
+}
+
+#[cfg(feature = "esplora")]
+impl ConsignmentMedia {
+    fn of(attachment: &Attachment, index: Option<u8>) -> Self {
+        ConsignmentMedia {
+            index,
+            mime: attachment.ty.to_string(),
+            digest: hex::encode(attachment.digest),
+        }
+    }
+}
+
+/// The media a fungible schema commits to, which hangs off the contract terms.
+#[cfg(feature = "esplora")]
+fn terms_media(terms: ContractTerms) -> Option<ConsignmentMedia> {
+    terms.media.as_ref().map(|a| ConsignmentMedia::of(a, None))
+}
+
 /// What the consignment says about the asset itself. Only available once it validates: the
 /// contract state these fields are read from is what validation produces.
 #[cfg(feature = "esplora")]
@@ -779,6 +811,10 @@ pub struct ConsignmentAsset {
     pub issuer: String,
     /// Unix timestamp the genesis carries.
     pub issued_at: i64,
+    /// The file the contract commits to as the asset's own image, when it commits to one.
+    pub media: Option<ConsignmentMedia>,
+    /// Further files the genesis commits to. Only a UDA files any.
+    pub attachments: Vec<ConsignmentMedia>,
 }
 
 /// What a consignment contains, read without a wallet.
@@ -1062,67 +1098,90 @@ fn history_of<const TRANSFER: bool>(
         .collect();
 
     let data = valid.contract_data();
-    let (ticker, name, details, precision, issued_supply, max_supply) = match schema {
-        ReadableSchema::Nia => {
-            let wrapper = NiaWrapper::with(data);
-            let spec = wrapper.spec();
-            (
-                Some(spec.ticker().to_string()),
-                spec.name().to_string(),
-                spec.details().map(|d| d.to_string()),
-                spec.precision.into(),
-                Some(wrapper.total_issued_supply().into()),
-                None,
-            )
-        }
-        ReadableSchema::Cfa => {
-            let wrapper = CfaWrapper::with(data);
-            (
-                None,
-                wrapper.name().to_string(),
-                wrapper.details().map(|d| d.to_string()),
-                wrapper.precision().into(),
-                Some(wrapper.total_issued_supply().into()),
-                None,
-            )
-        }
-        ReadableSchema::Uda => {
-            let wrapper = UdaWrapper::with(data);
-            let spec = wrapper.spec();
-            (
-                Some(spec.ticker().to_string()),
-                spec.name().to_string(),
-                spec.details().map(|d| d.to_string()),
-                spec.precision.into(),
-                None,
-                None,
-            )
-        }
-        ReadableSchema::Ifa => {
-            let wrapper = IfaWrapper::with(data);
-            let spec = wrapper.spec();
-            (
-                Some(spec.ticker().to_string()),
-                spec.name().to_string(),
-                spec.details().map(|d| d.to_string()),
-                spec.precision.into(),
-                Some(wrapper.total_issued_supply().into()),
-                Some(wrapper.max_supply().into()),
-            )
-        }
-        ReadableSchema::Pfa => {
-            let wrapper = PfaWrapper::with(data);
-            let spec = wrapper.spec();
-            (
-                Some(spec.ticker().to_string()),
-                spec.name().to_string(),
-                spec.details().map(|d| d.to_string()),
-                spec.precision.into(),
-                Some(wrapper.total_issued_supply().into()),
-                None,
-            )
-        }
-    };
+    let (ticker, name, details, precision, issued_supply, max_supply, media, attachments) =
+        match schema {
+            ReadableSchema::Nia => {
+                let wrapper = NiaWrapper::with(data);
+                let spec = wrapper.spec();
+                (
+                    Some(spec.ticker().to_string()),
+                    spec.name().to_string(),
+                    spec.details().map(|d| d.to_string()),
+                    spec.precision.into(),
+                    Some(wrapper.total_issued_supply().into()),
+                    None,
+                    terms_media(wrapper.contract_terms()),
+                    vec![],
+                )
+            }
+            ReadableSchema::Cfa => {
+                let wrapper = CfaWrapper::with(data);
+                (
+                    None,
+                    wrapper.name().to_string(),
+                    wrapper.details().map(|d| d.to_string()),
+                    wrapper.precision().into(),
+                    Some(wrapper.total_issued_supply().into()),
+                    None,
+                    terms_media(wrapper.contract_terms()),
+                    vec![],
+                )
+            }
+            ReadableSchema::Uda => {
+                let wrapper = UdaWrapper::with(data);
+                let spec = wrapper.spec();
+                // A UDA hangs its files off the token, not off the contract terms: `media` is the
+                // one face every holder is handed, and every further slot is an attachment the
+                // genesis commits to just as firmly.
+                let token = wrapper.token_data();
+                (
+                    Some(spec.ticker().to_string()),
+                    spec.name().to_string(),
+                    spec.details().map(|d| d.to_string()),
+                    spec.precision.into(),
+                    None,
+                    None,
+                    token
+                        .media
+                        .as_ref()
+                        .map(|a| ConsignmentMedia::of(a, None))
+                        .or_else(|| terms_media(wrapper.contract_terms())),
+                    token
+                        .attachments
+                        .iter()
+                        .map(|(index, a)| ConsignmentMedia::of(a, Some(*index)))
+                        .collect(),
+                )
+            }
+            ReadableSchema::Ifa => {
+                let wrapper = IfaWrapper::with(data);
+                let spec = wrapper.spec();
+                (
+                    Some(spec.ticker().to_string()),
+                    spec.name().to_string(),
+                    spec.details().map(|d| d.to_string()),
+                    spec.precision.into(),
+                    Some(wrapper.total_issued_supply().into()),
+                    Some(wrapper.max_supply().into()),
+                    terms_media(wrapper.contract_terms()),
+                    vec![],
+                )
+            }
+            ReadableSchema::Pfa => {
+                let wrapper = PfaWrapper::with(data);
+                let spec = wrapper.spec();
+                (
+                    Some(spec.ticker().to_string()),
+                    spec.name().to_string(),
+                    spec.details().map(|d| d.to_string()),
+                    spec.precision.into(),
+                    Some(wrapper.total_issued_supply().into()),
+                    None,
+                    terms_media(wrapper.contract_terms()),
+                    vec![],
+                )
+            }
+        };
     history.asset = Some(ConsignmentAsset {
         schema: schema.name().to_string(),
         ticker,
@@ -1133,6 +1192,8 @@ fn history_of<const TRANSFER: bool>(
         max_supply,
         issuer: consignment.genesis.issuer.to_string(),
         issued_at: consignment.genesis.timestamp,
+        media,
+        attachments,
     });
 
     // Every allocation the consignment reveals, by the assignment that created it, so that
