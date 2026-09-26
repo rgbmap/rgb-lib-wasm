@@ -1026,10 +1026,26 @@ pub fn consignment_history(
     // 🚨 `std::str::from_utf8`, not `str::from_utf8`: the associated form is newer than
     // this crate's MSRV, and clippy fails the build on it.
     let armored = || std::str::from_utf8(consignment_bytes).ok().map(str::trim);
-    if let Ok(transfer) = RgbTransfer::load(consignment_bytes) {
+    // rgb-lib stores the *validated* copy of a container under its own magic — `VCO` for a
+    // contract, `VTF` for a transfer. The payload after the magic is the same consignment
+    // encoding, and that copy is what a wallet's `assets/` directory hands out, so read it
+    // by patching the magic rather than decoding it twice.
+    let bytes: std::borrow::Cow<[u8]> = if consignment_bytes.len() >= 7 && &consignment_bytes[..4] == b"RGB\0" {
+        match &consignment_bytes[4..7] {
+            magic @ (b"VCO" | b"VTF") => {
+                let mut v = consignment_bytes.to_vec();
+                v[4..7].copy_from_slice(if magic == b"VCO" { b"CON" } else { b"TFR" });
+                std::borrow::Cow::Owned(v)
+            }
+            _ => std::borrow::Cow::Borrowed(consignment_bytes),
+        }
+    } else {
+        std::borrow::Cow::Borrowed(consignment_bytes)
+    };
+    if let Ok(transfer) = RgbTransfer::load(&*bytes) {
         return history_of(transfer, bitcoin_network);
     }
-    if let Ok(contract) = RgbContract::load(consignment_bytes) {
+    if let Ok(contract) = RgbContract::load(&*bytes) {
         return history_of(contract, bitcoin_network);
     }
     if let Some(text) = armored() {
@@ -1377,6 +1393,22 @@ mod tests {
             history.steps[1].creates[1].seal.is_none(),
             "a blinded receive states the amount and hides the destination"
         );
+    }
+
+    #[cfg(feature = "esplora")]
+    #[test]
+    fn consignment_history_reads_the_validated_copy_a_wallet_stores() {
+        // rgb-lib keeps a validated copy of a container under the `VTF`/`VCO` magic, and the
+        // `assets/` directory of a wallet backup hands out exactly those copies. The payload
+        // is the same, so the reading must be the same.
+        let mut vtf = TRANSFER_NIA.to_vec();
+        assert_eq!(&vtf[4..7], b"TFR", "the fixture is a plain transfer container");
+        vtf[4..7].copy_from_slice(b"VTF");
+        let plain = consignment_history(TRANSFER_NIA, BitcoinNetwork::Regtest).unwrap();
+        let validated = consignment_history(&vtf, BitcoinNetwork::Regtest).unwrap();
+        assert_eq!(validated.contract_id, plain.contract_id);
+        assert_eq!(validated.steps.len(), plain.steps.len());
+        assert!(validated.valid);
     }
 
     #[cfg(feature = "esplora")]
