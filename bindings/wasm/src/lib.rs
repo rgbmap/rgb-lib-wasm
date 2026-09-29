@@ -244,6 +244,33 @@ impl WasmWallet {
         to_js(&unspents)
     }
 
+    /// List the consignments the wallet holds and can export.
+    #[wasm_bindgen(js_name = "listStoredConsignments")]
+    pub fn list_stored_consignments(&self) -> Result<JsValue, JsValue> {
+        let consignments = self.inner.borrow().list_stored_consignments();
+        to_js(&consignments)
+    }
+
+    /// Export the consignment the wallet created for the transfer committed by the given witness
+    /// transaction. Returns the consignment bytes as Uint8Array.
+    #[wasm_bindgen(js_name = "exportSentConsignment")]
+    pub fn export_sent_consignment(&self, txid: &str, asset_id: &str) -> Result<Vec<u8>, JsValue> {
+        self.inner
+            .borrow()
+            .get_send_consignment(txid, asset_id)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Export the consignment the wallet received for the given recipient ID. Returns the
+    /// consignment bytes as Uint8Array.
+    #[wasm_bindgen(js_name = "exportReceivedConsignment")]
+    pub fn export_received_consignment(&self, recipient_id: &str) -> Result<Vec<u8>, JsValue> {
+        self.inner
+            .borrow()
+            .get_received_consignment(recipient_id)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
     /// List Bitcoin transactions. Always skips sync on wasm32.
     #[wasm_bindgen(js_name = "listTransactions")]
     pub fn list_transactions(&self) -> Result<JsValue, JsValue> {

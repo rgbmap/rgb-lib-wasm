@@ -330,6 +330,22 @@ pub struct Balance {
     pub spendable: u64,
 }
 
+/// A consignment the wallet holds and can export.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[cfg_attr(feature = "camel_case", serde(rename_all = "camelCase"))]
+pub struct StoredConsignment {
+    /// Which side of the transfer the wallet was on: "sent" or "received"
+    pub side: String,
+    /// Witness transaction ID (sent consignments)
+    pub txid: Option<String>,
+    /// Asset ID (sent consignments)
+    pub asset_id: Option<String>,
+    /// Recipient ID (received consignments)
+    pub recipient_id: Option<String>,
+    /// Consignment size in bytes
+    pub size: u32,
+}
+
 /// Data to receive an RGB transfer.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[cfg_attr(feature = "camel_case", serde(rename_all = "camelCase"))]
@@ -2488,6 +2504,64 @@ impl Wallet {
 
         info!(self.logger, "List transfers completed");
         Ok(transfers)
+    }
+
+    /// List the consignments the wallet holds and can export: the ones it created for sent
+    /// transfers and the ones it received.
+    #[cfg(feature = "esplora")]
+    pub fn list_stored_consignments(&self) -> Vec<StoredConsignment> {
+        let mut stored = vec![];
+        for (txid, artifacts) in &self.transfer_artifacts {
+            for (asset_id, bytes) in &artifacts.consignment_bytes {
+                stored.push(StoredConsignment {
+                    side: s!("sent"),
+                    txid: Some(txid.clone()),
+                    asset_id: Some(asset_id.clone()),
+                    recipient_id: None,
+                    size: bytes.len() as u32,
+                });
+            }
+        }
+        for (recipient_id, bytes) in &self.received_consignments {
+            stored.push(StoredConsignment {
+                side: s!("received"),
+                txid: None,
+                asset_id: None,
+                recipient_id: Some(recipient_id.clone()),
+                size: bytes.len() as u32,
+            });
+        }
+        stored
+    }
+
+    /// Return the consignment bytes the wallet created for the transfer committed by the given
+    /// witness transaction.
+    #[cfg(feature = "esplora")]
+    pub fn get_send_consignment(&self, txid: &str, asset_id: &str) -> Result<Vec<u8>, Error> {
+        let artifacts = self
+            .transfer_artifacts
+            .get(txid)
+            .ok_or_else(|| Error::UnknownTransfer {
+                txid: txid.to_string(),
+            })?;
+        artifacts
+            .consignment_bytes
+            .get(asset_id)
+            .cloned()
+            .ok_or_else(|| Error::Internal {
+                details: s!("no consignment stored for the given asset ID"),
+            })
+    }
+
+    /// Return the consignment bytes the wallet received for the given recipient ID.
+    #[cfg(feature = "esplora")]
+    pub fn get_received_consignment(&self, recipient_id: &str) -> Result<Vec<u8>, Error> {
+        self.received_consignments
+            .get(recipient_id)
+            .cloned()
+            .ok_or_else(|| Error::Internal {
+                details: s!("no consignment stored for the given recipient ID"),
+            })
     }
 
     /// List the [`Unspent`]s known to the wallet.
