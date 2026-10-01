@@ -39,6 +39,13 @@ pub(crate) struct WalletBackupPayload {
     /// Pinned derivation index per keychain for address reuse.
     #[serde(default)]
     pub(crate) reuse_address_index: std::collections::HashMap<bdk_wallet::KeychainKind, u32>,
+    /// The consignment bytes the wallet created for sends, by witness txid, and the ones it
+    /// received, by recipient id. A backup made before these fields existed restores with
+    /// them empty; the consignments cannot be recovered from such a backup.
+    #[serde(default)]
+    pub(crate) transfer_artifacts: std::collections::HashMap<String, super::online::TransferArtifacts>,
+    #[serde(default)]
+    pub(crate) received_consignments: std::collections::HashMap<String, Vec<u8>>,
 }
 
 /// Derive a 32-byte key from password + salt using Scrypt.
@@ -172,8 +179,8 @@ impl super::Wallet {
             sequence: 0,
             db: payload.db,
             bdk_changeset: payload.bdk_changeset,
-            transfer_artifacts: Default::default(),
-            received_consignments: Default::default(),
+            transfer_artifacts: payload.transfer_artifacts,
+            received_consignments: payload.received_consignments,
             stock_stash_b64: None,
             stock_state_b64: None,
             stock_index_b64: None,
@@ -300,8 +307,8 @@ impl super::Wallet {
             sequence: 0,
             db: payload.db,
             bdk_changeset: payload.bdk_changeset,
-            transfer_artifacts: Default::default(),
-            received_consignments: Default::default(),
+            transfer_artifacts: payload.transfer_artifacts,
+            received_consignments: payload.received_consignments,
             stock_stash_b64: None,
             stock_state_b64: None,
             stock_index_b64: None,
@@ -390,6 +397,8 @@ impl super::Wallet {
             stock_state_b64: general_purpose::STANDARD.encode(state_bytes.as_unconfined()),
             stock_index_b64: general_purpose::STANDARD.encode(index_bytes.as_unconfined()),
             reuse_address_index: self.reuse_address_index.clone(),
+            transfer_artifacts: self.transfer_artifacts.clone(),
+            received_consignments: self.received_consignments.clone(),
         };
 
         serde_json::to_vec(&payload).map_err(|e| InternalError::from(e).into())
